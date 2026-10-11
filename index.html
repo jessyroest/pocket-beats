@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pocket Beats</title>
+<meta name="description" content="A step sequencer with drums and a synth, every sound generated live with the Web Audio API.">
+<style>
+  :root {
+    --bg: #0d0e12; --panel: #16171d; --line: #262833; --text: #ececf2; --muted: #8b8d9c;
+    --drum: #ff6b4a; --synth: #7c6cff; --play: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; justify-content: center; padding: 20px 14px 40px; }
+  .app { width: min(100%, 980px); display: flex; flex-direction: column; gap: 14px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 20px; letter-spacing: .01em; }
+  h1 small { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 6px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .transport { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; color: var(--text); background: #1f2029; border: 1px solid var(--line); border-radius: 9px;
+    padding: 7px 12px; cursor: pointer; transition: border-color .15s, background .15s; }
+  button:hover { border-color: #3b3e4f; }
+  button.primary { background: var(--play); color: #191400; border-color: transparent; font-weight: 700; min-width: 86px; }
+  label { color: var(--muted); display: inline-flex; gap: 8px; align-items: center; }
+  label output { color: var(--text); font-variant-numeric: tabular-nums; min-width: 28px; }
+  input[type=range] { accent-color: var(--play); width: 100px; }
+  select { font: inherit; color: var(--text); background: #1f2029; border: 1px solid var(--line); border-radius: 9px; padding: 6px 8px; }
+  .spacer { flex: 1; }
+  .section-title { display: flex; justify-content: space-between; align-items: center; margin: 0 0 10px; color: var(--muted);
+    font-size: 11px; text-transform: uppercase; letter-spacing: .12em; }
+  .grid { display: grid; grid-template-columns: 70px repeat(16, 1fr); gap: 4px; align-items: center; }
+  .row-label { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; user-select: none; }
+  .row-label:hover { color: var(--text); }
+  .cell { aspect-ratio: 1; border-radius: 5px; background: #20212b; border: 1px solid transparent; cursor: pointer; padding: 0;
+    transition: background .08s, transform .08s, box-shadow .15s; min-width: 0; }
+  .cell.beat { background: #272834; }
+  .cell:hover { border-color: #444759; }
+  .drums .cell.on { background: var(--drum); box-shadow: 0 0 12px -2px var(--drum); }
+  .synth .cell.on { background: var(--synth); box-shadow: 0 0 12px -2px var(--synth); }
+  .cell.now { outline: 2px solid rgba(255,255,255,.55); outline-offset: 1px; }
+  .cell.on.hit { transform: scale(1.12); filter: brightness(1.35); }
+  canvas { width: 100%; height: 70px; display: block; border-radius: 10px; background: #0f1015; }
+  .knobs { display: flex; gap: 18px; flex-wrap: wrap; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; }
+  footer a { color: var(--muted); }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 48px repeat(16, 1fr); gap: 2px; } .cell { border-radius: 3px; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Pocket Beats <small>every sound is synthesized live, no samples</small></h1>
+  </header>
+
+  <div class="panel transport">
+    <button class="primary" id="play">▶ Play</button>
+    <label>BPM <input type="range" id="bpm" min="70" max="170" value="112"><output id="bpmOut">112</output></label>
+    <label>Swing <input type="range" id="swing" min="0" max="60" value="14"><output id="swingOut">14%</output></label>
+    <select id="preset" aria-label="Preset"></select>
+    <button id="random">Randomize</button>
+    <button id="clear">Clear</button>
+    <span class="spacer"></span>
+    <button id="share">Copy link</button>
+  </div>
+
+  <div class="panel">
+    <canvas id="scope"></canvas>
+  </div>
+
+  <div class="panel drums">
+    <div class="section-title"><span>Drums</span><span>click a name to preview</span></div>
+    <div class="grid" id="drumGrid"></div>
+  </div>
+
+  <div class="panel synth">
+    <div class="section-title"><span>Synth · pentatonic, so everything sounds good</span></div>
+    <div class="grid" id="synthGrid"></div>
+    <div class="knobs" style="margin-top:12px">
+      <label>Cutoff <input type="range" id="cutoff" min="200" max="6000" value="1800"></label>
+      <label>Resonance <input type="range" id="reso" min="0" max="20" value="7"></label>
+      <label>Delay <input type="range" id="delay" min="0" max="70" value="30"></label>
+      <label>Wave <select id="wave"><option>sawtooth</option><option>square</option><option>triangle</option></select></label>
+    </div>
+  </div>
+
+  <footer><kbd>Space</kbd> play / stop · patterns are saved in the link, so you can share a beat ·
+    one HTML file, Web Audio API, no libraries · <a href="https://github.com/jessyroest/pocket-beats">source</a></footer>
+</div>
+
+<script>
+'use strict';
+const STEPS = 16;
+const DRUMS = ['Kick', 'Snare', 'Clap', 'Hat', 'Open hat', 'Tom'];
+// A minor pentatonic over two octaves, top row = highest note
+const NOTES = [81, 79, 76, 74, 72, 69, 67, 64, 62, 60, 57];
+const NOTE_NAMES = ['A5', 'G5', 'E5', 'D5', 'C5', 'A4', 'G4', 'E4', 'D4', 'C4', 'A3'];
+
+const state = {
+  drums: DRUMS.map(() => new Array(STEPS).fill(false)),
+  synth: NOTES.map(() => new Array(STEPS).fill(false)),
+};
+
+// ---------- presets ----------
+const P = (s) => s.split('').map(c => c === 'x');
+const PRESETS = {
+  'House': {
+    drums: ['x...x...x...x...', '....x.......x...', '................', '..x...x...x...x.', '......x.......x.', '................'],
+    synth: { 0: [], 2: [], 3: [], 4: [14], 5: [0, 6], 6: [3, 10], 7: [8, 12], 8: [], 9: [] },
+  },
+  'Boom bap': {
+    drums: ['x......x..x.....', '....x.......x...', '............x...', 'x.x.x.x.x.x.x.x.', '................', '.............x.x'],
+    synth: { 4: [0], 5: [6], 6: [3, 10], 7: [], 8: [8], 9: [14] },
+  },
+  'Synthwave': {
+    drums: ['x.......x.......', '....x.......x...', '....x.......x...', 'x.x.x.x.x.x.x.x.', '..x...x...x...x.', '..............xx'],
+    synth: { 2: [12], 3: [8, 14], 4: [2, 6], 5: [0, 4, 10], 9: [0, 3, 6, 8], 10: [11, 14] },
+  },
+  'Empty': { drums: DRUMS.map(() => '................'), synth: {} },
+};
+function loadPreset(name) {
+  const p = PRESETS[name];
+  state.drums = p.drums.map(P);
+  state.synth = NOTES.map((_, r) => { const row = new Array(STEPS).fill(false); (p.synth[r] || []).forEach(s => row[s] = true); return row; });
+  paint(); saveHash();
+}
+
+// ---------- audio ----------
+let ac, master, comp, analyser, noiseBuf, delay, delayGain, synthBus;
+function initAudio() {
+  if (ac) return;
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.2;
+  master = ac.createGain(); master.gain.value = 0.8;
+  analyser = ac.createAnalyser(); analyser.fftSize = 2048;
+  master.connect(comp); comp.connect(analyser); analyser.connect(ac.destination);
+
+  // white noise, used by snare, clap and hats
+  noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+
+  // synth goes through a tempo-synced feedback delay
+  synthBus = ac.createGain(); synthBus.gain.value = 0.5;
+  delay = ac.createDelay(2);
+  delayGain = ac.createGain();
+  const fb = ac.createBiquadFilter(); fb.type = 'lowpass'; fb.frequency.value = 2500;
+  synthBus.connect(master);
+  synthBus.connect(delay); delay.connect(fb); fb.connect(delayGain); delayGain.connect(delay); delayGain.connect(master);
+  updateDelay();
+}
+
+function noise(t, dur) {
+  const src = ac.createBufferSource();
+  src.buffer = noiseBuf;
+  src.start(t, Math.random() * 0.5, dur + 0.05);
+  return src;
+}
+function env(g, t, peak, attack, decay) {
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+}
+
+const VOICES = {
+  Kick(t) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(160, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    env(g, t, 1.0, 0.002, 0.42);
+    o.connect(g).connect(master); o.start(t); o.stop(t + 0.5);
+    // a tiny click on top so it cuts through small speakers
+    const c = noise(t, 0.01), cg = ac.createGain(), hp = ac.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 1500; env(cg, t, 0.25, 0.001, 0.012);
+    c.connect(hp).connect(cg).connect(master);
+  },
+  Snare(t) {
+    const n = noise(t, 0.2), f = ac.createBiquadFilter(), g = ac.createGain();
+    f.type = 'bandpass'; f.frequency.value = 1900; f.Q.value = 0.7;
+    env(g, t, 0.55, 0.001, 0.18);
+    n.connect(f).connect(g).connect(master);
+    const o = ac.createOscillator(), og = ac.createGain();
+    o.type = 'triangle'; o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(140, t + 0.08);
+    env(og, t, 0.45, 0.001, 0.1);
+    o.connect(og).connect(master); o.start(t); o.stop(t + 0.15);
+  },
+  Clap(t) {
+    const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1200; f.Q.value = 1.2;
+    const g = ac.createGain(); g.gain.value = 0; f.connect(g).connect(master);
+    // three quick bursts and a tail, like several hands
+    [0, 0.012, 0.024].forEach(o => { g.gain.setValueAtTime(0.6, t + o); g.gain.exponentialRampToValueAtTime(0.05, t + o + 0.01); });
+    g.gain.setValueAtTime(0.5, t + 0.036); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    noise(t, 0.25).connect(f);
+  },
+  Hat(t) { hat(t, 0.05, 0.28); },
+  'Open hat'(t) { hat(t, 0.32, 0.22); },
+  Tom(t) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(190, t); o.frequency.exponentialRampToValueAtTime(95, t + 0.25);
+    env(g, t, 0.7, 0.002, 0.3);
+    o.connect(g).connect(master); o.start(t); o.stop(t + 0.4);
+  },
+};
+function hat(t, dur, vol) {
+  // metallic: a bank of detuned square waves through a highpass, plus a bit of noise
+  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+  const g = ac.createGain(); env(g, t, vol, 0.001, dur);
+  hp.connect(g).connect(master);
+  [263, 400, 421, 474, 587, 845].forEach(fr => {
+    const o = ac.createOscillator(); o.type = 'square'; o.frequency.value = fr * 2.1;
+    const og = ac.createGain(); og.gain.value = 0.15;
+    o.connect(og).connect(hp); o.start(t); o.stop(t + dur + 0.05);
+  });
+  const n = noise(t, dur), ng = ac.createGain(); ng.gain.value = 0.4; n.connect(ng).connect(hp);
+}
+
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+function synthNote(t, midi, len) {
+  const o = ac.createOscillator(), o2 = ac.createOscillator();
+  const f = ac.createBiquadFilter(), g = ac.createGain();
+  const wave = document.getElementById('wave').value;
+  o.type = o2.type = wave;
+  o.frequency.value = mtof(midi); o2.frequency.value = mtof(midi); o2.detune.value = 9;
+  f.type = 'lowpass'; f.Q.value = +document.getElementById('reso').value;
+  const cut = +document.getElementById('cutoff').value;
+  f.frequency.setValueAtTime(cut * 2.2, t);
+  f.frequency.exponentialRampToValueAtTime(Math.max(120, cut * 0.5), t + len);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.22, t + 0.008);
+  g.gain.setValueAtTime(0.22, t + len * 0.6);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  o.connect(f); o2.connect(f); f.connect(g).connect(synthBus);
+  o.start(t); o2.start(t); o.stop(t + len + 0.05); o2.stop(t + len + 0.05);
+}
+
+// ---------- scheduler (look-ahead, so timing stays tight even if the page stutters) ----------
+let playing = false, step = 0, nextTime = 0, timer = null;
+const queue = [];
+const bpmEl = document.getElementById('bpm'), swingEl = document.getElementById('swing');
+const stepDur = () => 60 / +bpmEl.value / 4;
+
+function schedule() {
+  while (nextTime < ac.currentTime + 0.12) {
+    const swing = (step % 2 === 1) ? stepDur() * (+swingEl.value / 100) * 0.5 : 0;
+    const t = nextTime + swing;
+    state.drums.forEach((row, r) => { if (row[step]) VOICES[DRUMS[r]](t); });
+    state.synth.forEach((row, r) => {
+      if (!row[step]) return;
+      let len = 1; while (len < 4 && row[(step + len) % STEPS] && step + len < STEPS) len++; // tied notes
+      if (step > 0 && row[step - 1]) return;                                                 // continuation of a tie
+      synthNote(t, NOTES[r], stepDur() * len * 0.95);
+    });
+    queue.push({ step, time: t });
+    nextTime += stepDur();
+    step = (step + 1) % STEPS;
+  }
+}
+
+function start() {
+  initAudio();
+  ac.resume();
+  playing = true; step = 0; nextTime = ac.currentTime + 0.05;
+  timer = setInterval(schedule, 25); schedule();
+  playBtn.textContent = '■ Stop';
+}
+function stop() {
+  playing = false; clearInterval(timer); queue.length = 0;
+  playBtn.textContent = '▶ Play';
+  document.querySelectorAll('.now').forEach(c => c.classList.remove('now'));
+}
+const playBtn = document.getElementById('play');
+playBtn.onclick = () => playing ? stop() : start();
+addEventListener('keydown', e => { if (e.code === 'Space' && e.target.tagName !== 'SELECT') { e.preventDefault(); playBtn.click(); } });
+
+// ---------- UI ----------
+const cells = { drums: [], synth: [] };
+function buildGrid(el, kind, labels) {
+  labels.forEach((name, r) => {
+    const lab = document.createElement('div');
+    lab.className = 'row-label'; lab.textContent = name;
+    lab.onclick = () => { initAudio(); ac.resume(); kind === 'drums' ? VOICES[DRUMS[r]](ac.currentTime) : synthNote(ac.currentTime, NOTES[r], 0.3); };
+    el.appendChild(lab);
+    cells[kind][r] = [];
+    for (let s = 0; s < STEPS; s++) {
+      const c = document.createElement('button');
+      c.className = 'cell' + (s % 4 === 0 ? ' beat' : '');
+      c.setAttribute('aria-label', `${name} step ${s + 1}`);
+      c.onpointerdown = (e) => {
+        e.preventDefault();
+        state[kind][r][s] = !state[kind][r][s];
+        dragValue = state[kind][r][s]; dragKind = kind;
+        paint(); saveHash();
+        if (dragValue) { initAudio(); ac.resume(); kind === 'drums' ? VOICES[DRUMS[r]](ac.currentTime) : synthNote(ac.currentTime, NOTES[r], 0.2); }
+      };
+      c.onpointerenter = (e) => {
+        if (e.buttons !== 1 || dragKind !== kind) return;
+        state[kind][r][s] = dragValue; paint(); saveHash();
+      };
+      el.appendChild(c);
+      cells[kind][r][s] = c;
+    }
+  });
+}
+let dragValue = true, dragKind = null;
+addEventListener('pointerup', () => dragKind = null);
+buildGrid(document.getElementById('drumGrid'), 'drums', DRUMS);
+buildGrid(document.getElementById('synthGrid'), 'synth', NOTE_NAMES);
+
+function paint() {
+  for (const kind of ['drums', 'synth'])
+    state[kind].forEach((row, r) => row.forEach((on, s) => cells[kind][r][s].classList.toggle('on', on)));
+}
+
+let shown = -1;
+function showStep(s) {
+  if (s === shown) return;
+  for (const kind of ['drums', 'synth'])
+    cells[kind].forEach((row, r) => {
+      if (shown >= 0) row[shown].classList.remove('now', 'hit');
+      row[s].classList.add('now');
+      if (state[kind][r][s]) row[s].classList.add('hit');
+    });
+  shown = s;
+}
+
+// ---------- share via URL ----------
+function encode() {
+  const bits = [...state.drums.flat(), ...state.synth.flat()];
+  let hex = '';
+  for (let i = 0; i < bits.length; i += 4) hex += ((bits[i] << 3) | (bits[i + 1] << 2) | (bits[i + 2] << 1) | (bits[i + 3] ? 1 : 0)).toString(16);
+  return `${hex}-${bpmEl.value}-${swingEl.value}`;
+}
+function decode(str) {
+  const [hex, bpm, swing] = str.split('-');
+  const bits = [];
+  for (const ch of hex) { const v = parseInt(ch, 16); bits.push(!!(v & 8), !!(v & 4), !!(v & 2), !!(v & 1)); }
+  if (bits.length < (DRUMS.length + NOTES.length) * STEPS) return false;
+  state.drums = DRUMS.map((_, r) => bits.slice(r * STEPS, (r + 1) * STEPS));
+  const off = DRUMS.length * STEPS;
+  state.synth = NOTES.map((_, r) => bits.slice(off + r * STEPS, off + (r + 1) * STEPS));
+  if (bpm) bpmEl.value = bpm;
+  if (swing) swingEl.value = swing;
+  return true;
+}
+let hashTimer;
+function saveHash() { clearTimeout(hashTimer); hashTimer = setTimeout(() => history.replaceState(null, '', '#' + encode()), 200); }
+
+document.getElementById('share').onclick = async (e) => {
+  history.replaceState(null, '', '#' + encode());
+  try { await navigator.clipboard.writeText(location.href); e.target.textContent = 'Copied!'; }
+  catch { e.target.textContent = 'Link is in the address bar'; }
+  setTimeout(() => e.target.textContent = 'Copy link', 1600);
+};
+
+// ---------- controls ----------
+const presetEl = document.getElementById('preset');
+Object.keys(PRESETS).forEach(n => presetEl.add(new Option(n, n)));
+presetEl.onchange = () => loadPreset(presetEl.value);
+document.getElementById('clear').onclick = () => loadPreset('Empty');
+document.getElementById('random').onclick = () => {
+  const dens = [0.28, 0.14, 0.08, 0.5, 0.12, 0.08];
+  state.drums = DRUMS.map((_, r) => Array.from({ length: STEPS }, (_, s) => r === 0 && s % 8 === 0 ? true : Math.random() < dens[r]));
+  state.synth = NOTES.map(() => new Array(STEPS).fill(false));
+  let row = 5;
+  for (let s = 0; s < STEPS; s++) {
+    if (Math.random() < 0.45) { row = Math.max(0, Math.min(NOTES.length - 1, row + ((Math.random() * 5) | 0) - 2)); state.synth[row][s] = true; }
+  }
+  paint(); saveHash();
+};
+function sync(id, fmt) { const el = document.getElementById(id), out = document.getElementById(id + 'Out'); const f = () => { out.textContent = fmt(el.value); saveHash(); updateDelay(); }; el.oninput = f; f(); }
+sync('bpm', v => v);
+sync('swing', v => v + '%');
+function updateDelay() {
+  if (!ac) return;
+  delay.delayTime.value = stepDur() * 3;   // dotted eighth
+  delayGain.gain.value = +document.getElementById('delay').value / 100;
+}
+document.getElementById('delay').oninput = updateDelay;
+
+// ---------- visuals ----------
+const scope = document.getElementById('scope'), sctx = scope.getContext('2d');
+let wave;
+function draw() {
+  const dpr = devicePixelRatio || 1;
+  const w = scope.clientWidth * dpr, h = scope.clientHeight * dpr;
+  if (scope.width !== w || scope.height !== h) { scope.width = w; scope.height = h; }
+  sctx.clearRect(0, 0, w, h);
+  if (ac && playing) {
+    while (queue.length && queue[0].time <= ac.currentTime) showStep(queue.shift().step);
+  }
+  sctx.lineWidth = 2 * dpr;
+  const grad = sctx.createLinearGradient(0, 0, w, 0);
+  grad.addColorStop(0, '#ff6b4a'); grad.addColorStop(0.5, '#ffd166'); grad.addColorStop(1, '#7c6cff');
+  sctx.strokeStyle = grad;
+  sctx.beginPath();
+  if (ac) {
+    wave = wave || new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(wave);
+    // start drawing at a rising zero crossing so the line holds still
+    let o = 0; for (let i = 1; i < wave.length / 2; i++) if (wave[i - 1] < 0 && wave[i] >= 0) { o = i; break; }
+    const n = wave.length / 2;
+    for (let i = 0; i < n; i++) {
+      const x = i / (n - 1) * w, y = h / 2 - wave[o + i] * h * 0.45;
+      i ? sctx.lineTo(x, y) : sctx.moveTo(x, y);
+    }
+  } else { sctx.moveTo(0, h / 2); sctx.lineTo(w, h / 2); }
+  sctx.stroke();
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+// ---------- boot ----------
+if (!(location.hash.length > 1 && decode(location.hash.slice(1)))) loadPreset('House');
+else { paint(); }
+document.getElementById('bpmOut').textContent = bpmEl.value;
+document.getElementById('swingOut').textContent = swingEl.value + '%';
+</script>
+</body>
+</html>
